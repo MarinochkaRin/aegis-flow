@@ -14,6 +14,10 @@ use uuid::Uuid;
 pub struct WorkflowId(Uuid);
 
 impl WorkflowId {
+    #[expect(
+        clippy::new_without_default,
+        reason = "Workflow IDs must be generated explicitly"
+    )]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
@@ -38,6 +42,10 @@ impl fmt::Display for WorkflowId {
 pub struct ActivityId(Uuid);
 
 impl ActivityId {
+    #[expect(
+        clippy::new_without_default,
+        reason = "Activity IDs must be generated explicitly"
+    )]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
@@ -64,6 +72,10 @@ impl fmt::Display for ActivityId {
 pub struct LeaseToken(Uuid);
 
 impl LeaseToken {
+    #[expect(
+        clippy::new_without_default,
+        reason = "Lease tokens must be generated explicitly for each lease"
+    )]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
@@ -110,7 +122,9 @@ mod tests {
     #[test]
     fn lease_token_debug_output_is_redacted() {
         let token = LeaseToken::new();
+
         assert_eq!(format!("{token:?}"), "LeaseToken(<redacted>)");
+
         assert_eq!(LeaseToken::from_uuid(token.as_uuid()), token);
     }
 }
