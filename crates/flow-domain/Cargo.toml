@@ -1,0 +1,10 @@
+[package]
+name = "flow-domain"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+uuid = { version = "1.26.1", features = ["v4"] }
+
+[dev-dependencies]
+proptest = "1.11.0"
