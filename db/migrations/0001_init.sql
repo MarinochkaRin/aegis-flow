@@ -128,11 +128,11 @@ BEGIN
         WHERE a.id = c.id
         RETURNING a.id, a.workflow_id, a.attempt, a.lease_token, a.lease_until
     ), logged AS (
-        INSERT INTO aegis.events(workflow_id, activity_id, event_type, details)
+        INSERT INTO aegis.events AS e(workflow_id, activity_id, event_type, details)
         SELECT c.workflow_id, c.id, 'ActivityClaimed',
                jsonb_build_object('attempt', c.attempt, 'worker_id', p_worker_id)
         FROM claimed AS c
-        RETURNING activity_id
+        RETURNING e.activity_id
     )
     SELECT c.id, c.workflow_id, c.attempt, c.lease_token, c.lease_until
     FROM claimed AS c JOIN logged AS l ON l.activity_id = c.id;
@@ -207,7 +207,7 @@ BEGIN
     IF NOT FOUND THEN
         RETURN false;
     END IF;
-    INSERT INTO aegis.events(workflow_id, activity_id, event_type, details)
+    INSERT INTO aegis.events AS e(workflow_id, activity_id, event_type, details)
     VALUES (affected_workflow, p_activity_id, 'ActivityFinished',
             jsonb_build_object('outcome', p_outcome, 'new_state', new_state));
     RETURN true;
@@ -247,11 +247,11 @@ BEGIN
         WHERE a.id = v.id
         RETURNING a.id, a.workflow_id, a.state
     ), logged AS (
-        INSERT INTO aegis.events(workflow_id, activity_id, event_type, details)
+        INSERT INTO aegis.events AS e(workflow_id, activity_id, event_type, details)
         SELECT r.workflow_id, r.id, 'ActivityLeaseExpired',
                jsonb_build_object('recovered_state', r.state)
         FROM recovered_rows AS r
-        RETURNING activity_id
+        RETURNING e.activity_id
     )
     SELECT count(*)::INTEGER INTO recovered FROM logged;
     RETURN recovered;
@@ -277,9 +277,9 @@ BEGIN
         WHERE a.id = d.id
         RETURNING a.id, a.workflow_id
     ), logged AS (
-        INSERT INTO aegis.events(workflow_id, activity_id, event_type)
+        INSERT INTO aegis.events AS e(workflow_id, activity_id, event_type)
         SELECT c.workflow_id, c.id, 'ActivityRetryReleased' FROM changed AS c
-        RETURNING activity_id
+        RETURNING e.activity_id
     )
     SELECT count(*)::INTEGER INTO released FROM logged;
     RETURN released;
