@@ -1,0 +1,14 @@
+[package]
+name = "flow-storage-pg"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+flow-domain = { path = "../flow-domain" }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+thiserror = "2"
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
