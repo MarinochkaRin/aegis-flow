@@ -20,9 +20,9 @@ pub enum StorageError {
     InvalidDuration,
     #[error("database returned invalid attempt: {0}")]
     InvalidAttempt(i64),
-    #[error("RetryableFailure requires a durable next-available timestamp")]
+    #[error("RetryableFailure requires a durable next-available timestamp or retry delay")]
     MissingRetryTimestamp,
-    #[error("only RetryableFailure accepts a next-available timestamp")]
+    #[error("only RetryableFailure accepts a next-available timestamp or retry delay")]
     UnexpectedRetryTimestamp,
 }
 
@@ -115,20 +115,8 @@ impl PgStorage {
         outcome: ActivityOutcome,
         next_available_at: Option<DateTime<Utc>>,
     ) -> Result<bool, StorageError> {
-        let outcome_label = match outcome {
-            ActivityOutcome::Success => "Success",
-            ActivityOutcome::RetryableFailure => "RetryableFailure",
-            ActivityOutcome::PermanentFailure => "PermanentFailure",
-            ActivityOutcome::Ambiguous => "Ambiguous",
-        };
-        match (outcome, next_available_at.is_some()) {
-            (ActivityOutcome::RetryableFailure, false) => {
-                return Err(StorageError::MissingRetryTimestamp);
-            }
-            (ActivityOutcome::RetryableFailure, true) => {}
-            (_, true) => return Err(StorageError::UnexpectedRetryTimestamp),
-            (_, false) => {}
-        }
+        validate_retry_timestamp(outcome, next_available_at.is_some())?;
+        let outcome_label = outcome_label(outcome);
         let row = self
             .client
             .query_one(
@@ -144,13 +132,53 @@ impl PgStorage {
         Ok(row.get(0))
     }
 
+    /// Finishes an activity while deriving retry availability from PostgreSQL
+    /// time rather than the worker's local clock.
+    ///
+    /// RetryableFailure requires `Some(delay)`. Other outcomes require None.
+    pub async fn finish_activity_after(
+        &self,
+        activity_id: ActivityId,
+        lease_token: LeaseToken,
+        outcome: ActivityOutcome,
+        retry_delay: Option<Duration>,
+    ) -> Result<bool, StorageError> {
+        validate_retry_timestamp(outcome, retry_delay.is_some())?;
+        let outcome_label = outcome_label(outcome);
+        let retry_interval = match retry_delay {
+            Some(delay) => interval_literal(delay, true)?,
+            None => "0 microseconds".to_owned(),
+        };
+        let row = self
+            .client
+            .query_one(
+                "SELECT aegis.finish_activity(\
+                    $1, $2, $3, \
+                    CASE WHEN $3 = 'RetryableFailure' \
+                         THEN clock_timestamp() + $4::text::interval \
+                         ELSE NULL END\
+                )",
+                &[
+                    &activity_id.as_uuid(),
+                    &lease_token.as_uuid(),
+                    &outcome_label,
+                    &retry_interval,
+                ],
+            )
+            .await?;
+        Ok(row.get(0))
+    }
+
     /// Moves up to 100 expired Running activities to RetryWaiting or Ambiguous
     /// according to their immutable effect policy. Zero delay is permitted.
     pub async fn recover_expired(&self, retry_delay: Duration) -> Result<i32, StorageError> {
         let interval = interval_literal(retry_delay, true)?;
         let row = self
             .client
-            .query_one("SELECT aegis.recover_expired($1::interval)", &[&interval])
+            .query_one(
+                "SELECT aegis.recover_expired($1::text::interval)",
+                &[&interval],
+            )
             .await?;
         Ok(row.get(0))
     }
@@ -162,6 +190,26 @@ impl PgStorage {
             .query_one("SELECT aegis.release_due_retries()", &[])
             .await?;
         Ok(row.get(0))
+    }
+}
+
+fn outcome_label(outcome: ActivityOutcome) -> &'static str {
+    match outcome {
+        ActivityOutcome::Success => "Success",
+        ActivityOutcome::RetryableFailure => "RetryableFailure",
+        ActivityOutcome::PermanentFailure => "PermanentFailure",
+        ActivityOutcome::Ambiguous => "Ambiguous",
+    }
+}
+
+fn validate_retry_timestamp(
+    outcome: ActivityOutcome,
+    retry_value_present: bool,
+) -> Result<(), StorageError> {
+    match (outcome, retry_value_present) {
+        (ActivityOutcome::RetryableFailure, false) => Err(StorageError::MissingRetryTimestamp),
+        (ActivityOutcome::RetryableFailure, true) | (_, false) => Ok(()),
+        (_, true) => Err(StorageError::UnexpectedRetryTimestamp),
     }
 }
 
@@ -201,5 +249,19 @@ mod tests {
             interval_literal(Duration::from_micros(1_500), false).unwrap(),
             "1500 microseconds"
         );
+    }
+
+    #[test]
+    fn retry_value_rules_match_activity_outcomes() {
+        assert!(validate_retry_timestamp(ActivityOutcome::RetryableFailure, true).is_ok());
+        assert!(matches!(
+            validate_retry_timestamp(ActivityOutcome::RetryableFailure, false),
+            Err(StorageError::MissingRetryTimestamp)
+        ));
+        assert!(validate_retry_timestamp(ActivityOutcome::Success, false).is_ok());
+        assert!(matches!(
+            validate_retry_timestamp(ActivityOutcome::Success, true),
+            Err(StorageError::UnexpectedRetryTimestamp)
+        ));
     }
 }
