@@ -1,0 +1,19 @@
+[package]
+name = "flow-worker"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+flow-domain = { path = "../flow-domain" }
+flow-storage-pg = { path = "../flow-storage-pg" }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "time"] }
+
+[dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serial_test = "4.0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4"] }
+uuid = "1.28.0"

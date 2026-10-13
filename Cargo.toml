@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
+
 members = [
     "crates/flow-domain",
     "crates/flow-storage-pg",
+    "crates/flow-worker",
 ]
